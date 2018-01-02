@@ -46,6 +46,8 @@ public class DemoConfiguration {
             .skip(FlatFileFormatException.class)
             .skip(IllegalArgumentException.class)
             .listener(skipListener())
+            .retryLimit(1)
+            .retry(IllegalArgumentException.class)
             .build();
     }
 
@@ -102,7 +104,8 @@ public class DemoConfiguration {
                     .map(Person::getName)
                     .filter("PEDRO"::equals)
                     .findAny().ifPresent(pedro -> {
-                        throw new IllegalArgumentException();
+                    System.out.println("Throwing IllegalArgumentException for PEDRO");
+                    throw new IllegalArgumentException();
                 });
 
                 System.out.println(String.join(", ",people.stream().map(Person::getName).toArray(String[]::new)));
