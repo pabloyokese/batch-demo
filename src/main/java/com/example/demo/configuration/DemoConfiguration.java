@@ -1,6 +1,7 @@
 package com.example.demo.configuration;
 
 import org.springframework.batch.core.Job;
+import org.springframework.batch.core.SkipListener;
 import org.springframework.batch.core.Step;
 import org.springframework.batch.core.configuration.annotation.EnableBatchProcessing;
 import org.springframework.batch.core.configuration.annotation.JobBuilderFactory;
@@ -9,10 +10,12 @@ import org.springframework.batch.core.launch.support.RunIdIncrementer;
 import org.springframework.batch.item.ItemReader;
 import org.springframework.batch.item.ItemWriter;
 import org.springframework.batch.item.file.FlatFileItemReader;
+import org.springframework.batch.item.file.FlatFileParseException;
 import org.springframework.batch.item.file.mapping.DefaultLineMapper;
 import org.springframework.batch.item.file.mapping.FieldSetMapper;
 import org.springframework.batch.item.file.transform.DelimitedLineTokenizer;
 import org.springframework.batch.item.file.transform.FieldSet;
+import org.springframework.batch.item.file.transform.FlatFileFormatException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -37,7 +40,32 @@ public class DemoConfiguration {
             .<Person,Person>chunk(2)
             .reader(csvReader())
             .writer(writer())
+            .faultTolerant()
+            .skipLimit(2)
+            .skip(FlatFileParseException.class)
+            .skip(FlatFileFormatException.class)
+            .skip(IllegalArgumentException.class)
+            .listener(skipListener())
             .build();
+    }
+
+    private SkipListener<? super Person, ? super Person> skipListener() {
+        return new SkipListener<Person, Person>() {
+            @Override
+            public void onSkipInRead(Throwable t) {
+                System.out.println("Skipped in read line: " + ((FlatFileParseException)t).getInput() );
+            }
+
+            @Override
+            public void onSkipInWrite(Person person, Throwable t) {
+                System.out.println("Skipped in write name: " + person.getName() );
+            }
+
+            @Override
+            public void onSkipInProcess(Person item, Throwable t) {
+
+            }
+        };
     }
 
     @Bean
@@ -70,6 +98,13 @@ public class DemoConfiguration {
         return new ItemWriter<Person>() {
             @Override
             public void write(List<? extends Person> people) throws Exception {
+                people.stream()
+                    .map(Person::getName)
+                    .filter("PEDRO"::equals)
+                    .findAny().ifPresent(pedro -> {
+                        throw new IllegalArgumentException();
+                });
+
                 System.out.println(String.join(", ",people.stream().map(Person::getName).toArray(String[]::new)));
             }
         };
