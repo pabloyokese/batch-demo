@@ -1,12 +1,11 @@
 package com.example.demo.configuration;
 
-import org.springframework.batch.core.Job;
-import org.springframework.batch.core.SkipListener;
-import org.springframework.batch.core.Step;
+import org.springframework.batch.core.*;
 import org.springframework.batch.core.configuration.annotation.EnableBatchProcessing;
 import org.springframework.batch.core.configuration.annotation.JobBuilderFactory;
 import org.springframework.batch.core.configuration.annotation.StepBuilderFactory;
 import org.springframework.batch.core.launch.support.RunIdIncrementer;
+import org.springframework.batch.core.scope.context.ChunkContext;
 import org.springframework.batch.item.ItemReader;
 import org.springframework.batch.item.ItemWriter;
 import org.springframework.batch.item.file.FlatFileItemReader;
@@ -48,7 +47,63 @@ public class DemoConfiguration {
             .listener(skipListener())
             .retryLimit(1)
             .retry(IllegalArgumentException.class)
+            .listener(stepExecution())
+            .listener(chunkListener())
             .build();
+    }
+
+    @Bean
+    public JobExecutionListener jobListener() {
+        return new JobExecutionListener() {
+            @Override
+            public void beforeJob(JobExecution jobExecution) {
+                System.out.println("Before executing job");
+            }
+
+            @Override
+            public void afterJob(JobExecution jobExecution) {
+                System.out.println("After executing job");
+            }
+        };
+    }
+
+    @Bean
+    public ChunkListener chunkListener() {
+        return new ChunkListener() {
+            @Override
+            public void beforeChunk(ChunkContext context) {
+                context.setAttribute("timing",System.currentTimeMillis());
+                System.out.println("Before chunk");
+            }
+
+            @Override
+            public void afterChunk(ChunkContext context) {
+                Long timing = System.currentTimeMillis() - (Long)context.getAttribute("timing");
+                System.out.println("After chunk. millis = " + timing);
+            }
+
+            @Override
+            public void afterChunkError(ChunkContext context) {
+                System.out.println("A chunk finished with errors");
+            }
+        };
+    }
+
+    @Bean
+    public StepExecutionListener stepExecution() {
+        return new StepExecutionListener() {
+            @Override
+            public void beforeStep(StepExecution stepExecution) {
+                System.out.println("Preparing to execute step");
+            }
+
+            @Override
+            public ExitStatus afterStep(StepExecution stepExecution) {
+                System.out.println("Ending executing step");
+                System.out.println(stepExecution.getSummary());
+                return stepExecution.getExitStatus();
+            }
+        };
     }
 
     private SkipListener<? super Person, ? super Person> skipListener() {
@@ -118,6 +173,7 @@ public class DemoConfiguration {
         return jobBuilderFactory.get("job1")
             .incrementer(new RunIdIncrementer())
             .start(step1)
+            .listener(jobListener())
             .build();
     }
 
