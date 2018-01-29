@@ -4,6 +4,7 @@ import org.springframework.batch.core.*;
 import org.springframework.batch.core.configuration.annotation.EnableBatchProcessing;
 import org.springframework.batch.core.configuration.annotation.JobBuilderFactory;
 import org.springframework.batch.core.configuration.annotation.StepBuilderFactory;
+import org.springframework.batch.core.configuration.annotation.StepScope;
 import org.springframework.batch.core.launch.support.RunIdIncrementer;
 import org.springframework.batch.core.scope.context.ChunkContext;
 import org.springframework.batch.item.ItemReader;
@@ -16,9 +17,13 @@ import org.springframework.batch.item.file.transform.DelimitedLineTokenizer;
 import org.springframework.batch.item.file.transform.FieldSet;
 import org.springframework.batch.item.file.transform.FlatFileFormatException;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.io.ClassPathResource;
+import org.springframework.core.io.Resource;
+import org.springframework.core.task.TaskExecutor;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.validation.BindException;
 
 import java.util.List;
@@ -34,10 +39,10 @@ public class DemoConfiguration {
     private StepBuilderFactory stepBuilderFactory;
 
     @Bean
-    public Step step1() {
-        return stepBuilderFactory.get("step1")
+    public Step slaveStep() {
+        return stepBuilderFactory.get("slaveStep")
             .<Person,Person>chunk(2)
-            .reader(csvReader())
+            .reader(csvReader(null))
             .writer(writer())
             .faultTolerant()
             .skipLimit(2)
@@ -50,6 +55,33 @@ public class DemoConfiguration {
             .listener(stepExecution())
             .listener(chunkListener())
             .build();
+    }
+
+    @Bean
+    public Step partitionStep() {
+        return stepBuilderFactory.get("partitionStep")
+            .partitioner("slaveStep", partitioner())
+            .step(slaveStep())
+            .taskExecutor(taskExecutor())
+            .build();
+    }
+
+    @Bean
+    public TaskExecutor taskExecutor() {
+        ThreadPoolTaskExecutor taskExecutor = new ThreadPoolTaskExecutor();
+        taskExecutor.setMaxPoolSize(5);
+        taskExecutor.setCorePoolSize(5);
+        taskExecutor.setQueueCapacity(5);
+        taskExecutor.afterPropertiesSet();
+        return taskExecutor;
+    }
+
+    @Bean
+    public CustomMultiResourcePartitioner partitioner() {
+        CustomMultiResourcePartitioner partitioner = new CustomMultiResourcePartitioner();
+        Resource[] resources = new Resource[] { new ClassPathResource("names0.csv"), new ClassPathResource("names1.csv") };
+        partitioner.setResources(resources);
+        return partitioner;
     }
 
     @Bean
@@ -126,7 +158,8 @@ public class DemoConfiguration {
     }
 
     @Bean
-    public ItemReader<Person> csvReader() {
+    @StepScope
+    public FlatFileItemReader<Person> csvReader(@Value("#{stepExecutionContext[fileName]}") String filename) {
         DelimitedLineTokenizer lineTokenizer = new DelimitedLineTokenizer();
         lineTokenizer.setNames(new String[]{"name", "age"});
 
@@ -135,7 +168,7 @@ public class DemoConfiguration {
         lineMapper.setFieldSetMapper(personMapper());
 
         FlatFileItemReader<Person> itemReader = new FlatFileItemReader<>();
-        itemReader.setResource(new ClassPathResource("names.csv"));
+        itemReader.setResource(new ClassPathResource(filename));
         itemReader.setLineMapper(lineMapper);
         return itemReader;
     }
@@ -169,10 +202,10 @@ public class DemoConfiguration {
     }
 
     @Bean
-    public Job job(Step step1) throws Exception {
+    public Job job() throws Exception {
         return jobBuilderFactory.get("job1")
             .incrementer(new RunIdIncrementer())
-            .start(step1)
+            .start(partitionStep())
             .listener(jobListener())
             .build();
     }
